@@ -1,0 +1,1538 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Territory Prototype – Cities, Economy & Warfare</title>
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    overflow: hidden;
+    background: #111;
+    color: #eee;
+    font-family: system-ui, sans-serif;
+  }
+
+  #ui {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    z-index: 10;
+    background: rgba(0,0,0,0.6);
+    padding: 8px 12px;
+    border-radius: 4px;
+    font-size: 14px;
+    display: none;
+  }
+
+  #gameCanvas {
+    display: block;
+    width: 100vw;
+    height: 100vh;
+    background: #020617;
+  }
+
+  .btn {
+    padding: 4px 8px;
+    border-radius: 4px;
+    border: none;
+    background: #4f46e5;
+    color: #fff;
+    cursor: pointer;
+    font-size: 12px;
+    margin-left: 4px;
+  }
+
+  #playerName {
+    margin-top: 6px;
+    padding: 4px;
+    border-radius: 4px;
+    border: none;
+    width: 120px;
+  }
+
+  /* MAIN MENU */
+  #mainMenu {
+    position: absolute;
+    inset: 0;
+    background: rgba(0,0,0,0.85);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 50;
+    font-size: 40px;
+    font-weight: bold;
+    text-align: center;
+    color: white;
+  }
+
+  #playBtn {
+    margin-top: 20px;
+    padding: 14px 28px;
+    font-size: 22px;
+    border: none;
+    border-radius: 6px;
+    background: #4f46e5;
+    color: white;
+    cursor: pointer;
+  }
+
+  #playBtn:hover {
+    background: #4338ca;
+  }
+
+  /* SETTINGS MENU */
+  #settingsMenu {
+    position: absolute;
+    inset: 0;
+    background: rgba(0,0,0,0.85);
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 40;
+    color: white;
+    font-size: 24px;
+  }
+
+  .settingRow {
+    margin: 10px 0;
+  }
+
+  select, input[type="color"] {
+    font-size: 18px;
+    padding: 6px;
+    border-radius: 6px;
+    border: none;
+  }
+
+  #startGameBtn {
+    margin-top: 20px;
+    padding: 12px 24px;
+    font-size: 20px;
+    border: none;
+    border-radius: 6px;
+    background: #22c55e;
+    color: white;
+    cursor: pointer;
+  }
+
+  #startGameBtn:hover {
+    background: #16a34a;
+  }
+</style>
+</head>
+<body>
+
+<!-- MAIN MENU -->
+<div id="mainMenu">
+  Territory Prototype
+  <button id="playBtn">Play</button>
+</div>
+
+<!-- SETTINGS MENU -->
+<div id="settingsMenu">
+  <div class="settingRow">
+    Map Size:
+    <select id="mapSize">
+      <option value="40x24">40×24</option>
+      <option value="80x48" selected>80×48</option>
+      <option value="120x72">120×72</option>
+      <option value="160x96">160×96</option>
+      <option value="earth">Earth (60×30)</option>
+    </select>
+  </div>
+
+  <div class="settingRow">
+    Difficulty:
+    <select id="difficulty">
+      <option value="veryeasy">Very Easy</option>
+      <option value="easy">Easy</option>
+      <option value="normal" selected>Normal</option>
+      <option value="hard">Hard</option>
+      <option value="insane">Insane</option>
+    </select>
+  </div>
+
+  <div class="settingRow">
+    Player Color:
+    <input type="color" id="playerColor" value="#22c55e">
+  </div>
+
+  <button id="startGameBtn">Start Game</button>
+</div>
+
+<!-- GAME UI -->
+<div id="ui">
+  <strong>Territory Prototype</strong><br>
+  Left-click: attack from your tile. Right-click: build or train on your tile.<br><br>
+
+  Money: <span id="moneyDisplay">0</span><br><br>
+
+  <input id="playerName" placeholder="Your name">
+  <button id="setNameBtn" class="btn">Set Name</button>
+  <button id="resetBtn" class="btn">Reset</button>
+</div>
+
+<canvas id="gameCanvas"></canvas>
+
+<script>
+/* -----------------------------
+   GAME VARIABLES
+------------------------------*/
+
+let COLS = 80;
+let ROWS = 48;
+
+let aiAttackChance = 0.30;
+let aiIncomeMultiplier = 1.0;
+let isEarthMap = false;
+
+/* -----------------------------
+   EARTH MAP MASK (60x30)
+------------------------------*/
+
+const EARTH_ROWS = 30;
+const EARTH_COLS = 60;
+
+const EARTH_MASK = [
+"............................................................",
+"......................######................................",
+"....................#########...............................",
+"...................###########.................######.......",
+"..................#############..............#########......",
+"..................#############.............###########.....",
+"..................#############.............###########.....",
+"...................###########.............###########.....",
+"....................#########..............##########......",
+"......................#####................#########.......",
+"...........................................########........",
+".............#####........................########.........",
+"............#######......................########..........",
+"...........#########....................########...........",
+"..........###########..................########............",
+".........#############.................#######.............",
+".........##############...............#######..............",
+"..........#############..............#######...............",
+"...........###########..............#######................",
+"............#########..............######..................",
+".............#######...............#####...................",
+"............................................................",
+".....######................................................",
+"....########...............................................",
+"...##########..............................................",
+"...##########..............................................",
+"....########...............................................",
+".....######................................................",
+"............................................................",
+"............................................................"
+];
+
+/* -----------------------------
+   CANVAS SETUP
+------------------------------*/
+
+const canvas = document.getElementById("gameCanvas");
+const ctx = canvas.getContext("2d");
+const resetBtn = document.getElementById("resetBtn");
+const setNameBtn = document.getElementById("setNameBtn");
+const nameInput = document.getElementById("playerName");
+const moneyDisplay = document.getElementById("moneyDisplay");
+
+let width, height;
+function resize() {
+  width = canvas.width = window.innerWidth;
+  height = canvas.height = window.innerHeight;
+}
+window.addEventListener("resize", resize);
+resize();
+
+/* -----------------------------
+   GAME STATE
+------------------------------*/
+
+let cells = [];
+let players = [];
+
+/* Troop base stats for advanced combat */
+const UNIT_STATS = {
+  infantry: { attack: 1.0, defense: 1.0 },
+  cavalry:  { attack: 1.3, defense: 0.9 },
+  artillery:{ attack: 2.0, defense: 0.6 }
+};
+
+/* Structure defense multipliers */
+function getStructureDefenseMult(structure) {
+  if (!structure) return 1.0;
+  if (structure === "city")       return 1.25; // Level 1
+  if (structure === "town")       return 1.40; // Level 2
+  if (structure === "metropolis") return 1.60; // Level 3
+  if (structure === "fortress")   return 2.20;
+  if (structure === "factory")    return 1.10;
+  if (structure === "store")      return 1.00;
+  return 1.0;
+}
+
+/* -----------------------------
+   GAME INITIALIZATION
+------------------------------*/
+
+function createEmptyTroops() {
+  return { infantry: 0, cavalry: 0, artillery: 0 };
+}
+
+function cloneTroops(t) {
+  return { infantry: t.infantry, cavalry: t.cavalry, artillery: t.artillery };
+}
+
+function totalTroops(t) {
+  return t.infantry + t.cavalry + t.artillery;
+}
+
+function createGame() {
+  cells = [];
+  for (let y = 0; y < ROWS; y++) {
+    const row = [];
+    for (let x = 0; x < COLS; x++) {
+      let land = true;
+      if (isEarthMap) {
+        if (y < EARTH_ROWS && x < EARTH_COLS) {
+          land = EARTH_MASK[y][x] === "#";
+        } else {
+          land = false;
+        }
+      }
+      row.push({
+        owner: null,
+        troops: createEmptyTroops(),
+        land,
+        biome: null,
+        structure: null
+      });
+    }
+    cells.push(row);
+  }
+
+  players = [
+    { id: 0, color: playerColor.value, ai: false, name: "Player", base: null, money: 0 },
+    { id: 1, color: "#ef4444", ai: true, name: "Red Empire", base: null, money: 0 },
+    { id: 2, color: "#3b82f6", ai: true, name: "Blue Dominion", base: null, money: 0 },
+    { id: 3, color: "#eab308", ai: true, name: "Golden Horde", base: null, money: 0 },
+    { id: 4, color: "#a855f7", ai: true, name: "Violet Union", base: null, money: 0 }
+  ];
+
+  if (isEarthMap) {
+    assignBiomesEarth();
+
+    placeBaseOnLand(players[0], 8, 13);
+    placeBaseOnLand(players[1], 30, 10);
+    placeBaseOnLand(players[2], 40, 14);
+    placeBaseOnLand(players[3], 48, 11);
+    placeBaseOnLand(players[4], 20, 22);
+  } else {
+    placeBase(players[0], 5, Math.floor(ROWS / 2));
+    placeBase(players[1], COLS - 6, 5);
+    placeBase(players[2], COLS - 6, ROWS - 6);
+    placeBase(players[3], Math.floor(COLS / 2), 5);
+    placeBase(players[4], Math.floor(COLS / 2), ROWS - 6);
+  }
+}
+
+function placeBase(player, x, y) {
+  const c = cells[y][x];
+  c.owner = player.id;
+  c.troops.infantry = 40;
+  c.troops.cavalry = 10;
+  player.base = { x, y };
+}
+
+function placeBaseOnLand(player, x, y) {
+  const radius = 5;
+  let best = null;
+  for (let dy = -radius; dy <= radius; dy++) {
+    for (let dx = -radius; dx <= radius; dx++) {
+      const nx = x + dx;
+      const ny = y + dy;
+      if (nx < 0 || ny < 0 || nx >= COLS || ny >= ROWS) continue;
+      const c = cells[ny][nx];
+      if (c.land && c.owner === null) {
+        best = { x: nx, y: ny };
+        break;
+      }
+    }
+    if (best) break;
+  }
+  if (!best) best = { x, y };
+  placeBase(player, best.x, best.y);
+}
+
+/* -----------------------------
+   BIOMES (EARTH ONLY)
+------------------------------*/
+
+function assignBiomesEarth() {
+  for (let y = 0; y < ROWS; y++) {
+    const lat = y / ROWS;
+    for (let x = 0; x < COLS; x++) {
+      const c = cells[y][x];
+      if (!c.land) continue;
+
+      if (lat < 0.20) {
+        c.biome = "snow";
+      } else if (lat < 0.40) {
+        c.biome = "forest";
+      } else if (lat < 0.65) {
+        c.biome = "grass";
+      } else if (lat < 0.80) {
+        c.biome = "desert";
+      } else {
+        c.biome = "tropical";
+      }
+
+      if (Math.random() < 0.06) {
+        c.biome = "mountain";
+      }
+    }
+  }
+}
+
+/* -----------------------------
+   HELPERS
+------------------------------*/
+
+function neighbors(x, y) {
+  const dirs = [[1,0],[-1,0],[0,1],[0,-1]];
+  const out = [];
+  for (const [dx,dy] of dirs) {
+    const nx = x + dx, ny = y + dy;
+    if (nx>=0 && nx<COLS && ny>=0 && ny<ROWS) out.push({x:nx,y:ny});
+  }
+  return out;
+}
+
+/* -----------------------------
+   ECONOMY (TROOPS + MONEY)
+------------------------------*/
+
+function getStructureLevel(structure) {
+  if (structure === "city") return 1;
+  if (structure === "town") return 2;
+  if (structure === "metropolis") return 3;
+  return 0;
+}
+
+function stepEconomy(dt) {
+  const baseTroopIncome = 3 * dt;
+
+  for (let y=0; y<ROWS; y++) {
+    for (let x=0; x<COLS; x++) {
+      const c = cells[y][x];
+      if (!c.land) continue;
+      if (c.owner === null) continue;
+
+      const owner = players[c.owner];
+
+      // Troop income (distributed mostly to infantry, some to cavalry, tiny to artillery)
+      let troopMult = (c.owner === 0 ? 1 : aiIncomeMultiplier);
+      if (c.biome === "mountain") troopMult *= 0.6;
+
+      const level = getStructureLevel(c.structure);
+      if (level === 1) troopMult *= 1.3;
+      if (level === 2) troopMult *= 1.6;
+      if (level === 3) troopMult *= 2.0;
+      if (c.structure === "factory") troopMult *= 1.3;
+      if (c.structure === "fortress") troopMult *= 1.1;
+
+      let troopGain = baseTroopIncome * troopMult;
+      c.troops.infantry += troopGain * 0.7;
+      c.troops.cavalry  += troopGain * 0.25;
+      c.troops.artillery+= troopGain * 0.05;
+
+      // Soft cap
+      const total = totalTroops(c.troops);
+      if (total > 250) {
+        const scale = 250 / total;
+        c.troops.infantry *= scale;
+        c.troops.cavalry  *= scale;
+        c.troops.artillery*= scale;
+      }
+
+      // Money income
+      let income = 1;
+
+      if (c.biome === "forest")   income *= 1.1;
+      if (c.biome === "grass")    income *= 1.0;
+      if (c.biome === "tropical") income *= 1.2;
+      if (c.biome === "desert")   income *= 0.7;
+      if (c.biome === "snow")     income *= 0.8;
+      if (c.biome === "mountain") income *= 0.5;
+
+      if (level === 1) income *= 1.5;
+      if (level === 2) income *= 2.0;
+      if (level === 3) income *= 2.7;
+
+      if (c.structure === "store")   income *= 1.4;
+      if (c.structure === "factory") income *= 1.2;
+      if (c.structure === "fortress") income *= 0.2;
+
+      // Store boosts adjacent tiles
+      const neigh = neighbors(x, y);
+      for (const n of neigh) {
+        const nc = cells[n.y][n.x];
+        if (nc.owner === c.owner && nc.structure === "store") {
+          income *= 1.3;
+          break;
+        }
+      }
+
+      if (owner.ai) {
+        income *= aiIncomeMultiplier;
+      }
+
+      owner.money += income * dt;
+    }
+  }
+}
+
+/* -----------------------------
+   TERRAIN MODIFIERS (ADVANCED)
+------------------------------*/
+
+function getTerrainAttackMult(unitType, biome, vsStructure) {
+  let mult = 1.0;
+
+  if (biome === "forest") {
+    if (unitType === "infantry") mult *= 1.1;
+  }
+  if (biome === "grass") {
+    if (unitType === "cavalry") mult *= 1.2;
+  }
+  if (biome === "mountain") {
+    if (unitType === "artillery") mult *= 0.8;
+    if (unitType === "infantry") mult *= 1.1;
+  }
+  if (biome === "desert") {
+    mult *= 0.9;
+  }
+  if (biome === "tropical") {
+    if (unitType === "infantry") mult *= 1.1;
+  }
+
+  if (vsStructure && unitType === "artillery") {
+    mult *= 1.3;
+  }
+
+  return mult;
+}
+
+function getTerrainDefenseMult(unitType, biome) {
+  let mult = 1.0;
+
+  if (biome === "forest") {
+    if (unitType === "infantry") mult *= 1.2;
+  }
+  if (biome === "grass") {
+    if (unitType === "cavalry") mult *= 1.1;
+  }
+  if (biome === "mountain") {
+    if (unitType === "infantry") mult *= 1.1;
+  }
+  if (biome === "desert") {
+    mult *= 0.9;
+  }
+  if (biome === "tropical") {
+    if (unitType === "infantry") mult *= 1.05;
+  }
+
+  return mult;
+}
+
+/* -----------------------------
+   COMBAT (ADVANCED FORMULA)
+------------------------------*/
+
+function computeEffectiveAttack(fromCell, toCell, sendTroops) {
+  let totalAttack = 0;
+  const biome = fromCell.biome;
+  const vsStructure = !!toCell.structure;
+
+  for (const type of ["infantry","cavalry","artillery"]) {
+    const count = sendTroops[type];
+    if (count <= 0) continue;
+    const base = UNIT_STATS[type].attack;
+    const terrainMult = getTerrainAttackMult(type, biome, vsStructure);
+    totalAttack += count * base * terrainMult;
+  }
+
+  return totalAttack;
+}
+
+function computeEffectiveDefense(cell) {
+  let totalDefense = 0;
+  const biome = cell.biome;
+  const structMult = getStructureDefenseMult(cell.structure);
+
+  for (const type of ["infantry","cavalry","artillery"]) {
+    const count = cell.troops[type];
+    if (count <= 0) continue;
+    const base = UNIT_STATS[type].defense;
+    const terrainMult = getTerrainDefenseMult(type, biome);
+    totalDefense += count * base * terrainMult;
+  }
+
+  return totalDefense * structMult;
+}
+
+function attack(from, to) {
+  const A = cells[from.y][from.x];
+  const B = cells[to.y][to.x];
+  if (!B.land) return;
+  if (A.owner === null) return;
+  if (totalTroops(A.troops) < 5) return;
+
+  // Send half of each unit type
+  const send = {
+    infantry: Math.floor(A.troops.infantry * 0.5),
+    cavalry:  Math.floor(A.troops.cavalry  * 0.5),
+    artillery:Math.floor(A.troops.artillery* 0.5)
+  };
+
+  if (send.infantry + send.cavalry + send.artillery <= 0) return;
+
+  A.troops.infantry -= send.infantry;
+  A.troops.cavalry  -= send.cavalry;
+  A.troops.artillery-= send.artillery;
+
+  const attackPower = computeEffectiveAttack(A, B, send);
+  const defensePower = computeEffectiveDefense(B);
+
+  if (attackPower > defensePower) {
+    const ratio = defensePower / attackPower;
+    const survivors = {
+      infantry: Math.max(0, Math.floor(send.infantry * (1 - ratio))),
+      cavalry:  Math.max(0, Math.floor(send.cavalry  * (1 - ratio))),
+      artillery:Math.max(0, Math.floor(send.artillery* (1 - ratio)))
+    };
+    B.owner = A.owner;
+    B.troops = survivors;
+    // Structures are destroyed on capture
+    B.structure = null;
+  } else {
+    const ratio = attackPower / defensePower;
+    B.troops.infantry = Math.max(0, Math.floor(B.troops.infantry * (1 - ratio)));
+    B.troops.cavalry  = Math.max(0, Math.floor(B.troops.cavalry  * (1 - ratio)));
+    B.troops.artillery= Math.max(0, Math.floor(B.troops.artillery* (1 - ratio)));
+  }
+}
+
+/* -----------------------------
+   AI (ATTACK + BUILD + TRAIN)
+------------------------------*/
+
+function aiStep(dt) {
+  for (const p of players) {
+    if (!p.ai) continue;
+
+    // ATTACK
+    if (Math.random() < aiAttackChance) {
+      const owned = [];
+      for (let y=0; y<ROWS; y++) {
+        for (let x=0; x<COLS; x++) {
+          const c = cells[y][x];
+          if (!c.land) continue;
+          if (c.owner === p.id && totalTroops(c.troops) > 25) {
+            owned.push({x,y});
+          }
+        }
+      }
+      if (owned.length) {
+        const from = owned[Math.floor(Math.random()*owned.length)];
+        const neigh = neighbors(from.x, from.y);
+        const candidates = neigh.filter(n => cells[n.y][n.x].land);
+        if (candidates.length) {
+          // Prefer attacking enemy structures
+          const structTargets = candidates.filter(n => {
+            const t = cells[n.y][n.x];
+            return t.owner !== null && t.owner !== p.id && t.structure;
+          });
+          const target = (structTargets.length
+            ? structTargets[Math.floor(Math.random()*structTargets.length)]
+            : candidates[Math.floor(Math.random()*candidates.length)]);
+          attack(from, target);
+        }
+      }
+    }
+
+    // ECONOMIC / MILITARY DECISIONS
+    if (p.money > 60) {
+      // Upgrade cities first
+      if (p.money > 140 && tryUpgradeCityForAI(p)) continue;
+      // Build fortress if rich
+      if (p.money > 220 && tryBuildForAI(p, "fortress")) continue;
+      // Try city
+      if (p.money > 150 && tryBuildForAI(p, "city")) continue;
+      // Try store
+      if (p.money > 120 && tryBuildForAI(p, "store")) continue;
+      // Try factory
+      if (p.money > 180 && tryBuildForAI(p, "factory")) continue;
+      // Train artillery if possible
+      if (p.money > 130 && tryTrainForAI(p, "artillery")) continue;
+    }
+  }
+}
+
+function tryBuildForAI(player, type) {
+  const candidates = [];
+  for (let y=0; y<ROWS; y++) {
+    for (let x=0; x<COLS; x++) {
+      const c = cells[y][x];
+      if (!c.land) continue;
+      if (c.owner !== player.id) continue;
+      if (c.structure !== null) continue;
+
+      if (!canBuildStructure(type, c, x, y, player)) continue;
+      candidates.push({x,y});
+    }
+  }
+  if (!candidates.length) return false;
+
+  const tile = candidates[Math.floor(Math.random()*candidates.length)];
+  const c = cells[tile.y][tile.x];
+  const cost = getStructureCost(type);
+
+  if (player.money >= cost) {
+    player.money -= cost;
+    c.structure = type;
+    return true;
+  }
+  return false;
+}
+
+function tryUpgradeCityForAI(player) {
+  const candidates = [];
+  for (let y=0; y<ROWS; y++) {
+    for (let x=0; x<COLS; x++) {
+      const c = cells[y][x];
+      if (!c.land) continue;
+      if (c.owner !== player.id) continue;
+      if (!c.structure) continue;
+      if (!canUpgradeCity(c)) continue;
+      candidates.push({x,y});
+    }
+  }
+  if (!candidates.length) return false;
+  const tile = candidates[Math.floor(Math.random()*candidates.length)];
+  const c = cells[tile.y][tile.x];
+  const cost = getUpgradeCost(c.structure);
+  if (player.money >= cost) {
+    player.money -= cost;
+    c.structure = upgradeStructure(c.structure);
+    return true;
+  }
+  return false;
+}
+
+function tryTrainForAI(player, unitType) {
+  const candidates = [];
+  for (let y=0; y<ROWS; y++) {
+    for (let x=0; x<COLS; x++) {
+      const c = cells[y][x];
+      if (!c.land) continue;
+      if (c.owner !== player.id) continue;
+      if (!c.structure) continue;
+      candidates.push({x,y});
+    }
+  }
+  if (!candidates.length) return false;
+  const tile = candidates[Math.floor(Math.random()*candidates.length)];
+  const c = cells[tile.y][tile.x];
+  const cost = getTrainCost(unitType);
+  if (player.money >= cost) {
+    player.money -= cost;
+    trainUnitOnTile(c, unitType);
+    return true;
+  }
+  return false;
+}
+
+/* -----------------------------
+   STRUCTURE RULES
+------------------------------*/
+
+function getStructureCost(type) {
+  if (type === "city")      return 100;
+  if (type === "store")     return 80;
+  if (type === "factory")   return 120;
+  if (type === "fortress")  return 180;
+  return 0;
+}
+
+function getUpgradeCost(structure) {
+  if (structure === "city")       return 120;
+  if (structure === "town")       return 180;
+  return Infinity;
+}
+
+function upgradeStructure(structure) {
+  if (structure === "city") return "town";
+  if (structure === "town") return "metropolis";
+  return structure;
+}
+
+function canUpgradeCity(c) {
+  if (c.structure === "city") return true;
+  if (c.structure === "town") return true;
+  return false;
+}
+
+function canBuildStructure(type, c, x, y, player) {
+  if (!c.land) return false;
+  if (c.owner !== player.id) return false;
+
+  if (type === "city") {
+    if (c.biome === "mountain") return false;
+    if (c.structure !== null) return false;
+    return true;
+  }
+
+  if (type === "store") {
+    if (c.structure !== null) return false;
+    if (c.biome === "grass" || c.biome === "forest" || c.biome === "tropical") {
+      return true;
+    }
+    return false;
+  }
+
+  if (type === "factory") {
+    if (c.structure !== null) return false;
+    if (c.biome === "mountain") return false;
+    return true;
+  }
+
+  if (type === "fortress") {
+    if (c.structure !== null) return false;
+    if (c.biome === "desert" || c.biome === "snow") return false;
+    return true;
+  }
+
+  return false;
+}
+
+/* -----------------------------
+   TRAINING RULES
+------------------------------*/
+
+function getTrainCost(unitType) {
+  if (unitType === "infantry")  return 20;
+  if (unitType === "cavalry")   return 35;
+  if (unitType === "artillery") return 60;
+  return Infinity;
+}
+
+function trainUnitOnTile(c, unitType) {
+  if (unitType === "infantry")  c.troops.infantry += 10;
+  if (unitType === "cavalry")   c.troops.cavalry  += 6;
+  if (unitType === "artillery") c.troops.artillery+= 3;
+}
+
+/* -----------------------------
+   DRAW (COASTLINES + BIOMES + STRUCTURES + TROOPS)
+------------------------------*/
+
+function drawMountainTile(x, y, cw, ch) {
+  const x0 = x * cw;
+  const y0 = y * ch;
+
+  ctx.beginPath();
+  ctx.moveTo(x0 + cw / 2, y0 + ch);
+  ctx.lineTo(x0,           y0 + ch * 0.4);
+  ctx.lineTo(x0 + cw,      y0 + ch * 0.4);
+  ctx.closePath();
+  ctx.fillStyle = "#475569";
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.moveTo(x0 + cw / 2,  y0);
+  ctx.lineTo(x0 + cw * 0.2, y0 + ch * 0.4);
+  ctx.lineTo(x0 + cw * 0.8, y0 + ch * 0.4);
+  ctx.closePath();
+  ctx.fillStyle = "#f8fafc";
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.moveTo(x0 + cw / 2,  y0);
+  ctx.lineTo(x0 + cw * 0.8, y0 + ch * 0.4);
+  ctx.lineTo(x0 + cw,       y0 + ch * 0.4);
+  ctx.lineTo(x0 + cw / 2,   y0 + ch);
+  ctx.lineTo(x0,            y0 + ch * 0.4);
+  ctx.lineTo(x0 + cw * 0.2, y0 + ch * 0.4);
+  ctx.closePath();
+  ctx.strokeStyle = "#000000";
+  ctx.lineWidth = 1;
+  ctx.stroke();
+}
+
+function drawCityIcon(x, y, cw, ch, level) {
+  const x0 = x * cw;
+  const y0 = y * ch;
+  const w = cw * 0.4;
+  const h = ch * 0.4;
+  const cx = x0 + cw * 0.5 - w / 2;
+  const cy = y0 + ch * 0.1;
+
+  if (level === 1) ctx.fillStyle = "#f9fafb";
+  if (level === 2) ctx.fillStyle = "#e5e7eb";
+  if (level === 3) ctx.fillStyle = "#d4d4d8";
+
+  ctx.fillRect(cx, cy, w, h);
+  ctx.strokeStyle = "#000";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(cx, cy, w, h);
+
+  if (level > 1) {
+    ctx.fillStyle = "#111827";
+    ctx.font = `${Math.floor(ch*0.35)}px system-ui`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "bottom";
+    ctx.fillText(level === 2 ? "T" : "M", x0 + cw/2, cy + h);
+  }
+}
+
+function drawStoreIcon(x, y, cw, ch) {
+  const x0 = x * cw;
+  const y0 = y * ch;
+  const r = Math.min(cw, ch) * 0.18;
+  const cx = x0 + cw * 0.5;
+  const cy = y0 + ch * 0.25;
+
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fillStyle = "#facc15";
+  ctx.fill();
+  ctx.strokeStyle = "#000";
+  ctx.lineWidth = 1;
+  ctx.stroke();
+}
+
+function drawFactoryIcon(x, y, cw, ch) {
+  const x0 = x * cw;
+  const y0 = y * ch;
+  const w = cw * 0.5;
+  const h = ch * 0.25;
+  const cx = x0 + cw * 0.5 - w / 2;
+  const cy = y0 + ch * 0.55;
+
+  ctx.fillStyle = "#6b7280";
+  ctx.fillRect(cx, cy, w, h);
+  ctx.strokeStyle = "#000";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(cx, cy, w, h);
+}
+
+function drawFortressIcon(x, y, cw, ch) {
+  const x0 = x * cw;
+  const y0 = y * ch;
+  const w = cw * 0.5;
+  const h = ch * 0.45;
+  const cx = x0 + cw * 0.5 - w / 2;
+  const cy = y0 + ch * 0.25;
+
+  ctx.fillStyle = "#1f2937";
+  ctx.fillRect(cx, cy, w, h);
+  ctx.strokeStyle = "#000";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(cx, cy, w, h);
+
+  ctx.beginPath();
+  ctx.moveTo(cx, cy);
+  ctx.lineTo(cx + w * 0.5, cy - h * 0.3);
+  ctx.lineTo(cx + w, cy);
+  ctx.closePath();
+  ctx.fillStyle = "#374151";
+  ctx.fill();
+  ctx.stroke();
+}
+
+function drawArtilleryIcon(x, y, cw, ch) {
+  const x0 = x * cw;
+  const y0 = y * ch;
+  const w = cw * 0.5;
+  const h = ch * 0.15;
+  const cx = x0 + cw * 0.5 - w / 2;
+  const cy = y0 + ch * 0.7;
+
+  ctx.fillStyle = "#f97316";
+  ctx.fillRect(cx, cy, w, h);
+  ctx.strokeStyle = "#000";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(cx, cy, w, h);
+}
+
+function draw() {
+  ctx.clearRect(0,0,width,height);
+  const cw = width / COLS;
+  const ch = height / ROWS;
+
+  for (let y=0; y<ROWS; y++) {
+    for (let x=0; x<COLS; x++) {
+      const c = cells[y][x];
+
+      // Coastline detection
+      let isCoast = false;
+      if (!c.land) {
+        const neigh = neighbors(x, y);
+        for (const n of neigh) {
+          if (cells[n.y][n.x].land) {
+            isCoast = true;
+            break;
+          }
+        }
+      }
+
+      const x0 = x * cw;
+      const y0 = y * ch;
+
+      if (!c.land) {
+        ctx.fillStyle = isCoast ? "#1e3a8a" : "#020617";
+        ctx.fillRect(x0, y0, cw, ch);
+      } else {
+        if (c.owner === null) {
+          if (c.biome === "mountain") {
+            drawMountainTile(x, y, cw, ch);
+          } else {
+            switch (c.biome) {
+              case "snow":     ctx.fillStyle = "#e2e8f0"; break;
+              case "forest":   ctx.fillStyle = "#14532d"; break;
+              case "grass":    ctx.fillStyle = "#166534"; break;
+              case "desert":   ctx.fillStyle = "#facc15"; break;
+              case "tropical": ctx.fillStyle = "#4ade80"; break;
+              default:         ctx.fillStyle = "#1e293b"; break;
+            }
+            ctx.fillRect(x0, y0, cw, ch);
+          }
+        } else {
+          ctx.fillStyle = players[c.owner].color;
+          ctx.fillRect(x0, y0, cw, ch);
+        }
+
+        // Structures (icons)
+        if (c.structure === "city" || c.structure === "town" || c.structure === "metropolis") {
+          drawCityIcon(x, y, cw, ch, getStructureLevel(c.structure));
+        } else if (c.structure === "store") {
+          drawStoreIcon(x, y, cw, ch);
+        } else if (c.structure === "factory") {
+          drawFactoryIcon(x, y, cw, ch);
+        } else if (c.structure === "fortress") {
+          drawFortressIcon(x, y, cw, ch);
+        }
+
+        // Artillery icon hint if present
+        if (c.troops.artillery >= 1) {
+          drawArtilleryIcon(x, y, cw, ch);
+        }
+
+        // Troop numbers
+        if (c.owner !== null && totalTroops(c.troops) > 1) {
+          ctx.fillStyle = "#fff";
+          ctx.font = `${Math.floor(ch*0.35)}px system-ui`;
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          const text = `I:${Math.floor(c.troops.infantry)} C:${Math.floor(c.troops.cavalry)} A:${Math.floor(c.troops.artillery)}`;
+          ctx.fillText(text, x0+cw/2, y0+ch/2);
+        }
+      }
+    }
+  }
+
+  // Player name labels
+  for (const p of players) {
+    if (!p.base) continue;
+    const cw2 = width / COLS;
+    const ch2 = height / ROWS;
+    const bx = p.base.x * cw2 + cw2 / 2;
+    const by = p.base.y * ch2 + ch2 / 2;
+
+    ctx.fillStyle = "#fff";
+    ctx.font = `${Math.floor(ch2 * 0.35)}px system-ui`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+    ctx.fillText(p.name, bx, by + ch2 * 0.4);
+  }
+
+  // Update money UI for player
+  moneyDisplay.textContent = Math.floor(players[0].money);
+}
+
+/* -----------------------------
+   INPUT (ATTACK + BUILD/TRAIN/UPGRADE)
+------------------------------*/
+
+canvas.addEventListener("click", e => {
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+  const cw = width / COLS;
+  const ch = height / ROWS;
+  const x = Math.floor(mx / cw);
+  const y = Math.floor(my / ch);
+
+  const c = cells[y][x];
+  if (!c.land) return;
+  if (c.owner !== 0) return;
+  if (totalTroops(c.troops) < 5) return;
+
+  const neigh = neighbors(x,y);
+  const candidates = neigh.filter(n => cells[n.y][n.x].land);
+  if (!candidates.length) return;
+  const target = candidates[Math.floor(Math.random()*candidates.length)];
+  attack({x,y}, target);
+});
+
+// Right-click to build / upgrade / train
+canvas.addEventListener("contextmenu", e => {
+  e.preventDefault();
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+  const cw = width / COLS;
+  const ch = height / ROWS;
+  const x = Math.floor(mx / cw);
+  const y = Math.floor(my / ch);
+
+  const c = cells[y][x];
+  const player = players[0];
+  if (!c.land) return;
+  if (c.owner !== 0) return;
+
+  const hasCityLike = (c.structure === "city" || c.structure === "town" || c.structure === "metropolis");
+
+  const choice = prompt(
+    "Actions on this tile:\n" +
+    "1 = Build City (100)\n" +
+    "2 = Build Store (80)\n" +
+    "3 = Build Factory (120)\n" +
+    "4 = Build Fortress (180)\n" +
+    (hasCityLike ? "5 = Upgrade City/Town (120/180)\n" : "") +
+    "6 = Train Infantry (20)\n" +
+    "7 = Train Cavalry (35)\n" +
+    "8 = Train Artillery (60)\n\n" +
+    "Leave empty or Cancel to do nothing."
+  );
+  if (!choice) return;
+
+  if (choice === "1" || choice === "2" || choice === "3" || choice === "4") {
+    let type = null;
+    if (choice === "1") type = "city";
+    if (choice === "2") type = "store";
+    if (choice === "3") type = "factory";
+    if (choice === "4") type = "fortress";
+    if (!type) return;
+
+    const cost = getStructureCost(type);
+    if (player.money < cost) {
+      alert("Not enough money.");
+      return;
+    }
+
+    if (!canBuildStructure(type, c, x, y, player)) {
+      alert("You cannot build that here.");
+      return;
+    }
+
+    player.money -= cost;
+    c.structure = type;
+    return;
+  }
+
+  if (choice === "5" && hasCityLike) {
+    if (!canUpgradeCity(c)) {
+      alert("This city cannot be upgraded further.");
+      return;
+    }
+    const cost = getUpgradeCost(c.structure);
+    if (player.money < cost) {
+      alert("Not enough money to upgrade.");
+      return;
+    }
+    player.money -= cost;
+    c.structure = upgradeStructure(c.structure);
+    return;
+  }
+
+  if (choice === "6" || choice === "7" || choice === "8") {
+    let unitType = null;
+    if (choice === "6") unitType = "infantry";
+    if (choice === "7") unitType = "cavalry";
+    if (choice === "8") unitType = "artillery";
+
+    const cost = getTrainCost(unitType);
+    if (player.money < cost) {
+      alert("Not enough money to train.");
+      return;
+    }
+    player.money -= cost;
+    trainUnitOnTile(c, unitType);
+    return;
+  }
+});
+
+/* -----------------------------
+   NAME SETTING
+------------------------------*/
+
+setNameBtn.onclick = () => {
+  const val = nameInput.value.trim();
+  if (val.length > 0) players[0].name = val;
+};
+
+/* -----------------------------
+   MAIN LOOP
+------------------------------*/
+
+let last = performance.now();
+function loop(now) {
+  const dt = (now - last) / 1000;
+  last = now;
+
+  stepEconomy(dt);
+  aiStep(dt);
+  draw();
+
+  requestAnimationFrame(loop);
+}
+
+resetBtn.addEventListener("click", createGame);
+
+/* -----------------------------
+   MAIN MENU + SETTINGS MENU
+------------------------------*/
+
+const mainMenu = document.getElementById("mainMenu");
+const settingsMenu = document.getElementById("settingsMenu");
+const playBtn = document.getElementById("playBtn");
+const startGameBtn = document.getElementById("startGameBtn");
+
+const mapSize = document.getElementById("mapSize");
+const difficulty = document.getElementById("difficulty");
+const playerColor = document.getElementById("playerColor");
+const ui = document.getElementById("ui");
+
+playBtn.onclick = () => {
+  mainMenu.style.display = "none";
+  settingsMenu.style.display = "flex";
+};
+
+startGameBtn.onclick = () => {
+  if (mapSize.value === "earth") {
+    isEarthMap = true;
+    COLS = EARTH_COLS;
+    ROWS = EARTH_ROWS;
+  } else {
+    isEarthMap = false;
+    const [w, h] = mapSize.value.split("x").map(Number);
+    COLS = w;
+    ROWS = h;
+  }
+
+  switch (difficulty.value) {
+    case "veryeasy":
+      aiAttackChance = 0.05;
+      aiIncomeMultiplier = 0.5;
+      break;
+    case "easy":
+      aiAttackChance = 0.15;
+      aiIncomeMultiplier = 0.8;
+      break;
+    case "normal":
+      aiAttackChance = 0.30;
+      aiIncomeMultiplier = 1.0;
+      break;
+    case "hard":
+      aiAttackChance = 0.45;
+      aiIncomeMultiplier = 1.3;
+      break;
+    case "insane":
+      aiAttackChance = 0.60;
+      aiIncomeMultiplier = 1.7;
+      break;
+  }
+
+  settingsMenu.style.display = "none";
+  ui.style.display = "block";
+
+  createGame();
+  requestAnimationFrame(loop);
+};
+</script>
+
+<script>
+// ===============================
+// CAMERA + ZOOM ADD‑ON (SAFE BLOCK)
+// ===============================
+
+// Camera + zoom variables
+let zoom = 1.0;
+let camX = 0;
+let camY = 0;
+
+let isPanning = false;
+let panStartX = 0;
+let panStartY = 0;
+let camStartX = 0;
+let camStartY = 0;
+
+// -------------------------------
+// ZOOM (mouse wheel)
+// -------------------------------
+window.addEventListener("wheel", e => {
+  if (e.deltaY < 0) zoom *= 1.1;
+  else zoom /= 1.1;
+
+  zoom = Math.max(0.3, Math.min(zoom, 3));
+});
+
+// -------------------------------
+// CAMERA PANNING (middle mouse)
+// -------------------------------
+canvas.addEventListener("mousedown", e => {
+  if (e.button === 1) {
+    isPanning = true;
+    panStartX = e.clientX;
+    panStartY = e.clientY;
+    camStartX = camX;
+    camStartY = camY;
+  }
+});
+
+canvas.addEventListener("mousemove", e => {
+  if (isPanning) {
+    camX = camStartX + (e.clientX - panStartX);
+    camY = camStartY + (e.clientY - panStartY);
+  }
+});
+
+canvas.addEventListener("mouseup", () => {
+  isPanning = false;
+});
+
+canvas.addEventListener("mouseleave", () => {
+  isPanning = false;
+});
+
+// -------------------------------
+// HELPER: Convert mouse → tile
+// (You can use this inside your click handlers)
+// -------------------------------
+function getTileFromMouse(e) {
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+
+  const cw = (width / COLS) * zoom;
+  const ch = (height / ROWS) * zoom;
+
+  const x = Math.floor((mx - camX) / cw);
+  const y = Math.floor((my - camY) / ch);
+
+  return { x, y };
+}
+</script>
+
+<script>
+// =========================================
+// FULL MULTIPLAYER MENU (HOST / JOIN / QUICK MATCH)
+// Works with Node.js signaling server + LAN/WiFi
+// =========================================
+
+// ⭐ CHANGE THIS TO YOUR SERVER ⭐
+const SIGNAL_SERVER = "ws://localhost:8080";
+// Example for WiFi: ws://192.168.1.102:8080
+// Example online: wss://yourdomain.com
+
+let signalSocket = null;
+let currentMatchId = null;
+let matchEndTime = null;
+let matchTimerInterval = null;
+
+// -----------------------------
+// SAFE MAIN MENU DETECTION
+// -----------------------------
+window.addEventListener("load", () => {
+
+  let mainMenu = document.getElementById("mainMenu");
+  if (!mainMenu) {
+    mainMenu = document.createElement("div");
+    mainMenu.id = "mainMenu";
+    mainMenu.style.position = "absolute";
+    mainMenu.style.top = "50%";
+    mainMenu.style.left = "50%";
+    mainMenu.style.transform = "translate(-50%, -50%)";
+    mainMenu.style.display = "flex";
+    mainMenu.style.flexDirection = "column";
+    mainMenu.style.alignItems = "center";
+    document.body.appendChild(mainMenu);
+  }
+
+  // -----------------------------
+  // MULTIPLAYER BUTTON
+  // -----------------------------
+  const mpBtn = document.createElement("button");
+  mpBtn.textContent = "Multiplayer";
+  mpBtn.style.marginTop = "20px";
+  mpBtn.style.padding = "14px 28px";
+  mpBtn.style.fontSize = "22px";
+  mpBtn.style.border = "none";
+  mpBtn.style.borderRadius = "6px";
+  mpBtn.style.background = "#4f46e5";
+  mpBtn.style.color = "white";
+  mpBtn.style.cursor = "pointer";
+  mainMenu.appendChild(mpBtn);
+
+  // -----------------------------
+  // MULTIPLAYER MENU OVERLAY
+  // -----------------------------
+  const mpMenu = document.createElement("div");
+  mpMenu.style.position = "absolute";
+  mpMenu.style.inset = "0";
+  mpMenu.style.background = "rgba(0,0,0,0.85)";
+  mpMenu.style.display = "none";
+  mpMenu.style.flexDirection = "column";
+  mpMenu.style.alignItems = "center";
+  mpMenu.style.justifyContent = "center";
+  mpMenu.style.zIndex = "60";
+  mpMenu.style.color = "white";
+  mpMenu.style.fontFamily = "system-ui";
+  mpMenu.style.fontSize = "32px";
+  mpMenu.innerHTML = `
+    <div style="margin-bottom:20px;">Multiplayer</div>
+    <button id="hostGame" style="padding:12px 24px;font-size:20px;margin:10px;">Host Game</button>
+    <button id="joinGame" style="padding:12px 24px;font-size:20px;margin:10px;">Join Game</button>
+    <button id="quickMatch" style="padding:12px 24px;font-size:20px;margin:10px;">Quick Match</button>
+    <button id="mpBack" style="padding:12px 24px;font-size:20px;margin-top:20px;">Back</button>
+  `;
+  document.body.appendChild(mpMenu);
+
+  // Open menu
+  mpBtn.onclick = () => {
+    mainMenu.style.display = "none";
+    mpMenu.style.display = "flex";
+  };
+
+  // Back button
+  document.getElementById("mpBack").onclick = () => {
+    mpMenu.style.display = "none";
+    mainMenu.style.display = "flex";
+  };
+
+  // -----------------------------
+  // CONNECT TO SERVER
+  // -----------------------------
+  function connectToServer() {
+    return new Promise(resolve => {
+      signalSocket = new WebSocket(SIGNAL_SERVER);
+
+      signalSocket.onopen = () => {
+        console.log("Connected to server");
+        resolve();
+      };
+
+      signalSocket.onerror = () => {
+        alert("Could not connect to server.\nCheck SIGNAL_SERVER URL.");
+      };
+
+      signalSocket.onmessage = msg => {
+        console.log("Server:", msg.data);
+      };
+    });
+  }
+
+  // -----------------------------
+  // MATCH TIMER UI
+  // -----------------------------
+  const matchTimer = document.createElement("div");
+  matchTimer.style.position = "absolute";
+  matchTimer.style.top = "10px";
+  matchTimer.style.left = "10px";
+  matchTimer.style.padding = "6px 10px";
+  matchTimer.style.background = "rgba(0,0,0,0.7)";
+  matchTimer.style.color = "white";
+  matchTimer.style.fontFamily = "system-ui";
+  matchTimer.style.fontSize = "16px";
+  matchTimer.style.borderRadius = "4px";
+  matchTimer.style.zIndex = "70";
+  matchTimer.style.display = "none";
+  document.body.appendChild(matchTimer);
+
+  function startMatchTimer() {
+    matchEndTime = Date.now() + (20 * 60 * 1000);
+    matchTimer.style.display = "block";
+
+    if (matchTimerInterval) clearInterval(matchTimerInterval);
+
+    matchTimerInterval = setInterval(() => {
+      const remaining = matchEndTime - Date.now();
+      if (remaining <= 0) {
+        matchTimer.textContent = "Time: 00:00";
+        clearInterval(matchTimerInterval);
+        alert("Match over!");
+        return;
+      }
+      const mins = Math.floor(remaining / 60000);
+      const secs = Math.floor((remaining % 60000) / 1000);
+      matchTimer.textContent =
+        "Time: " +
+        String(mins).padStart(2, "0") +
+        ":" +
+        String(secs).padStart(2, "0");
+    }, 1000);
+  }
+
+  // -----------------------------
+  // HOST GAME
+  // -----------------------------
+  document.getElementById("hostGame").onclick = async () => {
+    currentMatchId = Math.random().toString(36).substring(2, 8).toUpperCase();
+
+    alert("Hosting game!\nShare this code:\n\n" + currentMatchId);
+
+    await hostRealtimeGame(currentMatchId);
+    mpMenu.style.display = "none";
+    startMatchTimer();
+  };
+
+  // -----------------------------
+  // JOIN GAME
+  // -----------------------------
+  document.getElementById("joinGame").onclick = async () => {
+    const code = prompt("Enter match code:");
+    if (!code) return;
+
+    currentMatchId = code.toUpperCase();
+
+    alert("Joined match: " + currentMatchId);
+
+    await joinRealtimeGame(currentMatchId);
+    mpMenu.style.display = "none";
+    startMatchTimer();
+  };
+
+  // -----------------------------
+  // QUICK MATCH
+  // -----------------------------
+  document.getElementById("quickMatch").onclick = async () => {
+    currentMatchId = Math.random().toString(36).substring(2, 8).toUpperCase();
+
+    alert("Quick Match joined!\nMatch ID: " + currentMatchId);
+
+    await joinRealtimeGame(currentMatchId);
+    mpMenu.style.display = "none";
+    startMatchTimer();
+  };
+
+});
+</script>
+
+</body>
+</html>
